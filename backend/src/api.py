@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 import os
 from flask import Flask, request, jsonify, abort
 from sqlalchemy import exc
@@ -37,9 +36,11 @@ def index():
 def fetch_drinks():
     # endpoint for fetching all available drinks
     drinks = Drink.query.all()
+    if len(drinks) == 0:
+        return jsonify({"drinks": "No drinks to display"})
     return jsonify({
-        "success": True,
-        "drinks": [d.short() for d in drinks]
+        'success': True,
+        'drinks': [d.short() for d in drinks]
     }), 200
 
 
@@ -52,9 +53,9 @@ def fetch_drinks():
         or appropriate status code indicating reason for failure
 '''
 @app.route('/drinks-detail')
-@requires_auth('get:drinks-detail')
+@requires_auth('get:drinks-details')
 def fetch_drinks_detail(payload):
-    # GET drinks detail
+    # endpoint for getting drinks detail
     drinks = Drink.query.all()
     return jsonify({
         "success": True,
@@ -74,16 +75,23 @@ def fetch_drinks_detail(payload):
 @app.route('/drinks', methods=['POST'])
 @requires_auth('post:drinks')
 def add_drinks(payload):
-    # Post drinks
-    body = request.get_json()
-    drink = Drink()
-    drink.recipe = json.dumps(body.get("recipe"))
-    drink.title = body.get("title")
-    drink.insert()
-    return jsonify({
-        "success": True,
-        "drinks": drink.long()
-    }), 200
+    # endpoint to add a drink
+    request_data = request.get_json()
+
+    try:
+        recipe = request_data['recipe']
+        if isinstance(recipe, dict):
+            recipe = [recipe]
+
+        drink = Drink()
+        drink.title = request_data['title']
+        drink.recipe = json.dumps(recipe)
+        drink.insert()
+
+    except BaseException:
+        abort(400)
+
+    return jsonify({'success': True, 'drinks': [drink.long()]})
 
 
 '''
@@ -99,16 +107,18 @@ def add_drinks(payload):
 '''
 @app.route('/drinks/<int:id>', methods=['PATCH'])
 @requires_auth('patch:drinks')
-def modify_drinks(*args, **kwargs):
+def modify_drink(payload, id):
+    # endpoint for updating a drink based on drink id
     body = request.get_json()
-    drink = Drink.query.filter_by(id=kwargs.get("id")).one_or_none()
+    drink = Drink.query.filter(Drink.id == id).one_or_none()
 
     if not drink:
-        abort(404, "Drink not found.")
+        abort(404)
 
     drink.recipe = body.get("recipe", drink.recipe)
     drink.title = body.get("title", drink.title)
 
+    # check that recipe is of type list, then convert it to a string
     if isinstance(drink.recipe, list):
         drink.recipe = json.dumps(drink.recipe)
 
@@ -131,17 +141,17 @@ def modify_drinks(*args, **kwargs):
 '''
 @app.route('/drinks/<int:id>', methods=['DELETE'])
 @requires_auth('delete:drinks')
-def delete_drinks(*args, **kwargs):
-    # Delete drinks
-    drink = Drink.query.filter_by(id=kwargs.get("id")).one_or_none()
+def delete_drinks(payload, id):
+    # Delete drinks basing on the drink id
+    drink = Drink.query.filter(Drink.id == id).one_or_none()
 
     if not drink:
-        abort(404, "Drink not found.")
+        abort(404)
 
     drink.delete()
     return jsonify({
         "success": True,
-        "delete": kwargs.get("id")
+        "delete": id
     }), 200
 
 
@@ -169,7 +179,7 @@ def unprocessable(error):
 
 '''
 @app.errorhandler(400)
-def user_error(error):
+def bad_request(error):
     return jsonify({
         "success": False,
         "error": 400,
@@ -177,13 +187,22 @@ def user_error(error):
     }), 400
 
 
-@app.errorhandler(401)
-def permission_error(error):
+@app.errorhandler(500)
+def internal_server_error(error):
     return jsonify({
         "success": False,
-        "error": 401,
-        "message": "Authentication error"
-    }), 401
+        "error": 500,
+        "message": 'Internal Server Error. Contact admin!'
+    }), 500
+
+
+@app.errorhandler(405)
+def method_not_allowed(error):
+    return jsonify({
+        "success": False,
+        "error": 405,
+        "message": 'Method Not Allowed. Double check that you are using the appropriate method for resource.'
+    }), 405
 
 
 '''
@@ -195,7 +214,7 @@ def not_found(error):
     return jsonify({
         "success": False,
         "error": 404,
-        "message": "resource not found"
+        "message": "Resource not found"
     }), 404
 
 
